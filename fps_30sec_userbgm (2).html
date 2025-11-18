@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>30초 제한 버전 + 사용자 BGM</title>
+<style>
+  body { margin: 0; background: #111111; }
+  canvas {
+    display: block;
+    margin: 0 auto;
+    image-rendering: pixelated;
+    background: #222222;
+  }
+  #stopBtn, #speedSlow, #speedNormal, #speedFast, #zoomIn, #zoomOut, #bgmBtn, #bgmFile {
+    position: absolute;
+    top: 10px;
+    padding: 8px 14px;
+    font-size: 14px;
+    border: none;
+    cursor: pointer;
+  }
+  #stopBtn { left: 10px; background: #ff4444; color: white; }
+  #speedSlow { left: 90px; background: #4444ff; color: white; }
+  #speedNormal { left: 180px; background: #44aa44; color: white; }
+  #speedFast { left: 280px; background: #ffaa44; color: white; }
+  #zoomIn { left: 370px; background: #aa44ff; color: white; }
+  #zoomOut { left: 460px; background: #44dddd; color: black; }
+  #bgmFile { right: 140px; background: #dddddd; color: black; }
+  #bgmBtn { right: 10px; background: #ffaaee; color: black; }
+  #captionBox {
+    position: absolute;
+    top: 70px;
+    left: 20px;
+    font-size: 26px;
+    color: white;
+    font-weight: bold;
+    text-shadow: 2px 2px 2px black;
+  }
+</style>
+</head>
+<body>
+
+<button id="stopBtn">STOP</button>
+<button id="speedSlow">느림</button>
+<button id="speedNormal">보통</button>
+<button id="speedFast">빠름</button>
+<button id="zoomIn">확대</button>
+<button id="zoomOut">축소</button>
+<input type="file" id="bgmFile" accept="audio/*,video/*">
+<button id="bgmBtn">배경음 켜기</button>
+
+<div id="captionBox"></div>
+<canvas id="game" width="900" height="550"></canvas>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const caption=document.getElementById("captionBox");
+const bgmFileInput=document.getElementById("bgmFile");
+
+let width=canvas.width;
+let height=canvas.height;
+let crosshairX=width/2;
+let crosshairY=height/2;
+
+let targets=[];
+let score=0;
+let stopGame=false;
+let speedScale=1;
+let timeLeft=30;
+let combo=0;
+
+const praiseTexts=["잘했어","멋져","대단해","굿샷","완벽해","정확해"];
+
+let audioCtx=null;
+let masterGain=null;
+let bgmOscillators=[];
+let bgmTimer=null;
+
+let userBgm=null;
+let userBgmLoaded=false;
+
+let bgmOn=false;
+let useUserFile=false;
+
+function startWebAudioBgm(){
+  if(audioCtx) return;
+  audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  masterGain=audioCtx.createGain();
+  masterGain.gain.value=0.05;
+  masterGain.connect(audioCtx.destination);
+
+  const baseNotes=[261.63,329.63,392.0,523.25];
+
+  for(let i=0;i<3;i++){
+    const osc=audioCtx.createOscillator();
+    osc.type="sine";
+    osc.frequency.value=baseNotes[i];
+    osc.connect(masterGain);
+    osc.start();
+    bgmOscillators.push(osc);
+  }
+
+  bgmTimer=setInterval(()=>{
+    if(!audioCtx) return;
+    const now=audioCtx.currentTime;
+    bgmOscillators.forEach((osc,idx)=>{
+      const n=baseNotes[Math.floor(Math.random()*baseNotes.length)];
+      osc.frequency.setTargetAtTime(n,now,0.2+idx*0.1);
+    });
+  },800);
+}
+
+function stopWebAudioBgm(){
+  if(!audioCtx) return;
+  clearInterval(bgmTimer);
+  bgmTimer=null;
+  bgmOscillators.forEach(osc=>{ try{osc.stop();}catch(e){} });
+  bgmOscillators=[];
+  masterGain.disconnect();
+  masterGain=null;
+  audioCtx.close();
+  audioCtx=null;
+}
+
+bgmFileInput.addEventListener("change",e=>{
+  const file=e.target.files[0];
+  if(!file) return;
+
+  if(userBgm){ try{userBgm.pause();}catch(e){} }
+
+  const url=URL.createObjectURL(file);
+  userBgm=new Audio();
+  userBgm.src=url;
+  userBgm.loop=true;
+  userBgm.volume=0.4;
+  userBgmLoaded=true;
+  useUserFile=true;
+
+  if(audioCtx) stopWebAudioBgm();
+});
+
+document.getElementById("bgmBtn").onclick=()=>{
+  const btn=document.getElementById("bgmBtn");
+
+  if(useUserFile && userBgmLoaded){
+    if(!bgmOn){
+      userBgm.play().then(()=>{
+        bgmOn=true;
+        btn.textContent="배경음 끄기";
+      }).catch(()=>{
+        alert("브라우저에서 차단됨. 화면 클릭 후 다시 시도.");
+      });
+    } else {
+      userBgm.pause();
+      bgmOn=false;
+      btn.textContent="배경음 켜기";
+    }
+  } else {
+    if(!bgmOn){
+      startWebAudioBgm();
+      bgmOn=true;
+      btn.textContent="배경음 끄기";
+    } else {
+      stopWebAudioBgm();
+      bgmOn=false;
+      btn.textContent="배경음 켜기";
+    }
+  }
+};
+
+function playPraise(forcedText){
+  const text=forcedText||praiseTexts[Math.floor(Math.random()*praiseTexts.length)];
+  caption.textContent=text;
+  setTimeout(()=>{ if(caption.textContent===text) caption.textContent=""; },1200);
+
+  try{
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang="ko-KR";
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+setInterval(()=>{ if(!stopGame && timeLeft>0) timeLeft--; },1000);
+
+setInterval(()=>{ if(!stopGame && timeLeft>0) playPraise(); },5000);
+
+function spawnTarget(){
+  if(stopGame) return;
+  const x=Math.random()*width;
+  const y=Math.random()*height;
+  const angle=Math.random()*Math.PI*2;
+  const baseSpeed=0.4+Math.random()*0.6;
+  const speed=baseSpeed*speedScale;
+
+  targets.push({
+    x,y,r:28,
+    vx:Math.cos(angle)*speed,
+    vy:Math.sin(angle)*speed,
+    timer:0,
+    baseSpeed
+  });
+}
+
+function update(){
+  if(stopGame||timeLeft<=0) return;
+  targets.forEach(t=>{
+    t.x+=t.vx;
+    t.y+=t.vy;
+    if(t.x<0||t.x>width) t.vx*=-1;
+    if(t.y<0||t.y>height) t.vy*=-1;
+
+    t.timer++;
+    if(t.timer>80){
+      const angle=Math.random()*Math.PI*2;
+      const speed=t.baseSpeed*speedScale;
+      t.vx=Math.cos(angle)*speed;
+      t.vy=Math.sin(angle)*speed;
+      t.timer=0;
+    }
+  });
+}
+
+function draw(){
+  ctx.clearRect(0,0,width,height);
+
+  targets.forEach(t=>{
+    ctx.fillStyle="#ff4444";
+    ctx.beginPath();
+    ctx.arc(t.x,t.y,t.r,0,Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle="#ffffff";
+    ctx.beginPath();
+    ctx.arc(t.x,t.y,t.r/2,0,Math.PI*2);
+    ctx.stroke();
+  });
+
+  ctx.strokeStyle="#ffffff";
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(crosshairX-10,crosshairY);
+  ctx.lineTo(crosshairX+10,crosshairY);
+  ctx.moveTo(crosshairX,crosshairY-10);
+  ctx.lineTo(crosshairX,crosshairY+10);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(crosshairX,crosshairY,4,0,Math.PI*2);
+  ctx.stroke();
+
+  ctx.fillStyle="white";
+  ctx.font="18px Arial";
+  ctx.fillText("점수: "+score,10,530);
+  ctx.fillText("남은 시간: "+timeLeft+"초",720,530);
+}
+
+canvas.addEventListener("mousemove",e=>{
+  const rect=canvas.getBoundingClientRect();
+  crosshairX=e.clientX-rect.left;
+  crosshairY=e.clientY-rect.top;
+});
+
+canvas.addEventListener("click",e=>{
+  if(stopGame||timeLeft<=0) return;
+  const rect=canvas.getBoundingClientRect();
+  const mx=e.clientX-rect.left;
+  const my=e.clientY-rect.top;
+  let hit=false;
+
+  targets=targets.filter(t=>{
+    const dx=mx-t.x;
+    const dy=my-t.y;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    if(dist<t.r+5){
+      score++;
+      combo++;
+      hit=true;
+      return false;
+    }
+    return true;
+  });
+
+  if(hit){
+    timeLeft+=speedScale*2;
+    if(combo>=2 && Math.random()<0.9) playPraise();
+  } else {
+    combo=0;
+  }
+});
+
+document.getElementById("stopBtn").onclick=()=>{
+  stopGame=true;
+  stopWebAudioBgm();
+  if(userBgm && bgmOn) userBgm.pause();
+};
+
+function updateSpeed(scale){
+  speedScale=scale;
+  targets.forEach(t=>{
+    const angle=Math.atan2(t.vy,t.vx);
+    const speed=t.baseSpeed*speedScale;
+    t.vx=Math.cos(angle)*speed;
+    t.vy=Math.sin(angle)*speed;
+  });
+}
+
+document.getElementById("speedSlow").onclick=()=>updateSpeed(0.5);
+document.getElementById("speedNormal").onclick=()=>updateSpeed(1);
+document.getElementById("speedFast").onclick=()=>updateSpeed(1.6);
+
+document.getElementById("zoomIn").onclick=()=>{
+  canvas.width+=120;
+  canvas.height+=70;
+  width=canvas.width;
+  height=canvas.height;
+};
+document.getElementById("zoomOut").onclick=()=>{
+  canvas.width=Math.max(500,canvas.width-120);
+  canvas.height=Math.max(350,canvas.height-70);
+  width=canvas.width;
+  height=canvas.height;
+};
+
+setInterval(spawnTarget,2000);
+
+function loop(){
+  update();
+  draw();
+  if(!stopGame) requestAnimationFrame(loop);
+}
+loop();
+</script>
+
+</body>
+</html>
