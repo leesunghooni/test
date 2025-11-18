@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Combo Target Game</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111111;
+      color: #ffffff;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    #topBar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      background: #222222;
+      box-sizing: border-box;
+    }
+    #topBar button, #topBar select {
+      padding: 6px 10px;
+      border: none;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    #topBar button {
+      background: #444444;
+      color: #ffffff;
+    }
+    #topBar button:hover {
+      background: #666666;
+    }
+    #gameContainer {
+      display: flex;
+      justify-content: center;
+      margin-top: 8px;
+    }
+    canvas {
+      background: #000000;
+      image-rendering: pixelated;
+      touch-action: none;
+    }
+    #infoBar {
+      margin-top: 6px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    #overlay {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+    #overlayContent {
+      background: #222222;
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 320px;
+      width: 90%;
+      box-sizing: border-box;
+    }
+    #overlayContent h2 {
+      margin-top: 0;
+    }
+    #overlayContent button {
+      margin-top: 10px;
+      padding: 8px 14px;
+      border: none;
+      background: #4caf50;
+      color: #ffffff;
+      cursor: pointer;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="topBar">
+    <button id="startBtn">게임 시작</button>
+    <button id="stopBtn">정지</button>
+    <button id="slowBtn">느림</button>
+    <button id="normalBtn">보통</button>
+    <button id="fastBtn">빠름</button>
+    <span>배경음</span>
+    <button id="bgmToggleBtn">끄기</button>
+    <span>기본 BGM 선택</span>
+    <select id="bgmSelect">
+      <option value="random">랜덤</option>
+      <option value="bgm1">BGM 1</option>
+      <option value="bgm2">BGM 2</option>
+    </select>
+  </div>
+
+  <div id="gameContainer">
+    <canvas id="gameCanvas" width="800" height="450"></canvas>
+  </div>
+
+  <div id="infoBar">
+    <span id="timeText">시간 30</span>
+    |
+    <span id="scoreText">점수 0</span>
+    |
+    <span id="comboText">콤보 0</span>
+    |
+    <span id="accuracyText">정확도 0 퍼센트</span>
+    |
+    <span id="bestText">최고 점수 0</span>
+  </div>
+
+  <div id="overlay">
+    <div id="overlayContent">
+      <h2>게임 종료</h2>
+      <p id="resultScore"></p>
+      <p id="resultBest"></p>
+      <p id="resultDetail"></p>
+      <button id="restartBtn">다시 시작</button>
+    </div>
+  </div>
+
+  <audio id="bgm1" loop>
+    <source src="https://upload.wikimedia.org/wikipedia/commons/4/45/Beep-09.ogg" type="audio/ogg">
+  </audio>
+  <audio id="bgm2" loop>
+    <source src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Beep-1000hz-1s.ogg" type="audio/ogg">
+  </audio>
+  <audio id="hitSound">
+    <source src="https://upload.wikimedia.org/wikipedia/commons/3/3b/Beep_1000hz_500ms.ogg" type="audio/ogg">
+  </audio>
+
+<script>
+(function() {
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn = document.getElementById("stopBtn");
+  const slowBtn = document.getElementById("slowBtn");
+  const normalBtn = document.getElementById("normalBtn");
+  const fastBtn = document.getElementById("fastBtn");
+  const timeText = document.getElementById("timeText");
+  const scoreText = document.getElementById("scoreText");
+  const comboText = document.getElementById("comboText");
+  const accuracyText = document.getElementById("accuracyText");
+  const bestText = document.getElementById("bestText");
+
+  const overlay = document.getElementById("overlay");
+  const resultScore = document.getElementById("resultScore");
+  const resultBest = document.getElementById("resultBest");
+  const resultDetail = document.getElementById("resultDetail");
+  const restartBtn = document.getElementById("restartBtn");
+
+  const bgmToggleBtn = document.getElementById("bgmToggleBtn");
+  const bgmSelect = document.getElementById("bgmSelect");
+  const bgm1 = document.getElementById("bgm1");
+  const bgm2 = document.getElementById("bgm2");
+  const hitSound = document.getElementById("hitSound");
+
+  let targets = [];
+  let effects = [];
+  let bonusItems = [];
+
+  let gameTime = 30;
+  let timeLeft = 30;
+  let lastTime = 0;
+  let running = false;
+
+  let baseSpeed = 100;
+  let difficultyLevel = 1;
+
+  let score = 0;
+  let combo = 0;
+  let shots = 0;
+  let hits = 0;
+  let bestScore = parseInt(localStorage.getItem("comboGameBestScore") || "0", 10);
+
+  let crosshairX = canvas.width / 2;
+  let crosshairY = canvas.height / 2;
+
+  let bgmOn = false;
+  let currentBgm = null;
+
+  function rand(min, max) {
+    return Math.random() * (max - min) + min;
+  }
+
+  function createTarget() {
+    const typeRand = Math.random();
+    let radius;
+    let value;
+    let color;
+    let pattern;
+    if (typeRand < 0.5) {
+      radius = 22;
+      value = 1;
+      color = "#ff4444";
+      pattern = "normal";
+    } else if (typeRand < 0.8) {
+      radius = 14;
+      value = 3;
+      color = "#44ff44";
+      pattern = "zigzag";
+    } else {
+      radius = 10;
+      value = 5;
+      color = "#ffff44";
+      pattern = "fast";
+    }
+
+    const side = Math.random() < 0.5 ? "left" : "right";
+    const x = side === "left" ? -radius - 5 : canvas.width + radius + 5;
+    const y = rand(radius + 10, canvas.height - radius - 10);
+    const speed = baseSpeed * difficultyLevel * (pattern === "fast" ? 1.6 : 1.0);
+    const vx = side === "left" ? speed : -speed;
+    const vy = pattern === "zigzag" ? rand(-speed * 0.4, speed * 0.4) : 0;
+
+    targets.push({
+      x,
+      y,
+      radius,
+      value,
+      color,
+      vx,
+      vy,
+      pattern,
+      angle: 0
+    });
+  }
+
+  function createBonusItem() {
+    const radius = 14;
+    const x = rand(radius + 10, canvas.width - radius - 10);
+    const y = rand(radius + 10, canvas.height - radius - 10);
+    bonusItems.push({
+      x,
+      y,
+      radius,
+      color: "#44ddff",
+      life: 4
+    });
+  }
+
+  function createHitEffect(x, y, text) {
+    effects.push({
+      x,
+      y,
+      r: 5,
+      maxR: 30,
+      alpha: 1,
+      text,
+      life: 0.4
+    });
+  }
+
+  function startGame() {
+    score = 0;
+    combo = 0;
+    shots = 0;
+    hits = 0;
+    difficultyLevel = 1;
+    timeLeft = gameTime;
+    lastTime = performance.now() / 1000;
+
+    targets = [];
+    effects = [];
+    bonusItems = [];
+    for (let i = 0; i < 4; i++) {
+      createTarget();
+    }
+
+    overlay.style.display = "none";
+    running = true;
+    updateTexts();
+    if (bgmOn) {
+      playBgm();
+    }
+  }
+
+  function stopGame() {
+    running = false;
+    stopBgm();
+  }
+
+  function playBgm() {
+    stopBgm();
+    let choice = bgmSelect.value;
+    if (choice === "random") {
+      choice = Math.random() < 0.5 ? "bgm1" : "bgm2";
+    }
+    if (choice === "bgm1") {
+      currentBgm = bgm1;
+    } else if (choice === "bgm2") {
+      currentBgm = bgm2;
+    }
+    if (currentBgm) {
+      currentBgm.currentTime = 0;
+      currentBgm.play().catch(() => {});
+    }
+  }
+
+  function stopBgm() {
+    if (currentBgm) {
+      try {
+        currentBgm.pause();
+      } catch(e) {}
+      currentBgm = null;
+    }
+  }
+
+  function toggleBgm() {
+    bgmOn = !bgmOn;
+    if (bgmOn) {
+      bgmToggleBtn.textContent = "켜기";
+      if (running) {
+        playBgm();
+      }
+    } else {
+      bgmToggleBtn.textContent = "끄기";
+      stopBgm();
+    }
+  }
+
+  function updateTexts() {
+    timeText.textContent = "시간 " + Math.max(0, Math.floor(timeLeft));
+    scoreText.textContent = "점수 " + score;
+    comboText.textContent = "콤보 " + combo;
+    const acc = shots > 0 ? Math.round((hits / shots) * 100) : 0;
+    accuracyText.textContent = "정확도 " + acc + " 퍼센트";
+    bestText.textContent = "최고 점수 " + bestScore;
+  }
+
+  function gameOver() {
+    running = false;
+    stopBgm();
+    const acc = shots > 0 ? Math.round((hits / shots) * 100) : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      localStorage.setItem("comboGameBestScore", bestScore.toString());
+    }
+    resultScore.textContent = "이번 점수 " + score;
+    resultBest.textContent = "최고 점수 " + bestScore;
+    resultDetail.textContent =
+      "맞춘 수 " + hits + " 발사 수 " + shots + " 정확도 " + acc + " 퍼센트 콤보 최대 " + combo;
+    overlay.style.display = "flex";
+  }
+
+  function handleShot(x, y) {
+    if (!running) return;
+    shots++;
+
+    let hitSomething = false;
+
+    for (let i = targets.length - 1; i >= 0; i--) {
+      const t = targets[i];
+      const dx = x - t.x;
+      const dy = y - t.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= t.radius) {
+        hitSomething = true;
+        hits++;
+        score += t.value + combo;
+        combo++;
+        createHitEffect(t.x, t.y, combo >= 3 ? "Great" : "Hit");
+        if (navigator.vibrate) {
+          navigator.vibrate(40);
+        }
+        try {
+          hitSound.currentTime = 0;
+          hitSound.play();
+        } catch(e) {}
+        targets.splice(i, 1);
+        createTarget();
+        break;
+      }
+    }
+
+    if (!hitSomething) {
+      combo = 0;
+    }
+
+    for (let i = bonusItems.length - 1; i >= 0; i--) {
+      const b = bonusItems[i];
+      const dx = x - b.x;
+      const dy = y - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= b.radius) {
+        timeLeft += 3;
+        createHitEffect(b.x, b.y, "+3s");
+        bonusItems.splice(i, 1);
+        hitSomething = true;
+        break;
+      }
+    }
+
+    updateTexts();
+  }
+
+  function update(dt) {
+    if (!running) return;
+
+    timeLeft -= dt;
+    if (timeLeft <= 0) {
+      timeLeft = 0;
+      updateTexts();
+      gameOver();
+      return;
+    }
+
+    const elapsed = gameTime - timeLeft;
+    difficultyLevel = 1 + elapsed / gameTime;
+
+    if (Math.random() < dt * 0.4) {
+      createTarget();
+    }
+
+    if (Math.random() < dt * 0.15) {
+      createBonusItem();
+    }
+
+    for (let i = targets.length - 1; i >= 0; i--) {
+      const t = targets[i];
+      if (t.pattern === "zigzag") {
+        t.angle += dt * 6;
+        t.vy = Math.sin(t.angle) * baseSpeed * 0.8 * difficultyLevel;
+      }
+      t.x += t.vx * dt;
+      t.y += t.vy * dt;
+
+      if (t.y < t.radius || t.y > canvas.height - t.radius) {
+        t.vy *= -1;
+      }
+
+      if (t.x < -t.radius - 50 || t.x > canvas.width + t.radius + 50) {
+        targets.splice(i, 1);
+        createTarget();
+      }
+    }
+
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const e = effects[i];
+      e.r += 80 * dt;
+      e.alpha -= dt * 2.5;
+      e.life -= dt;
+      if (e.life <= 0 || e.alpha <= 0) {
+        effects.splice(i, 1);
+      }
+    }
+
+    for (let i = bonusItems.length - 1; i >= 0; i--) {
+      const b = bonusItems[i];
+      b.life -= dt;
+      if (b.life <= 0) {
+        bonusItems.splice(i, 1);
+      }
+    }
+
+    updateTexts();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const t = performance.now() / 1000;
+    const wobbleX = Math.sin(t * 4) * 3;
+    const wobbleY = Math.cos(t * 3) * 3;
+    const drawCrossX = crosshairX + wobbleX;
+    const drawCrossY = crosshairY + wobbleY;
+
+    for (const b of bonusItems) {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+      ctx.fillStyle = b.color;
+      ctx.fill();
+      ctx.fillStyle = "#000000";
+      ctx.font = "12px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("+3", b.x, b.y);
+    }
+
+    for (const t of targets) {
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
+      ctx.fillStyle = t.color;
+      ctx.fill();
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    for (const e of effects) {
+      ctx.save();
+      ctx.globalAlpha = e.alpha;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      if (e.text) {
+        ctx.font = "18px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#ffff88";
+        ctx.fillText(e.text, e.x, e.y - 24);
+      }
+      ctx.restore();
+    }
+
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(drawCrossX - 15, drawCrossY);
+    ctx.lineTo(drawCrossX + 15, drawCrossY);
+    ctx.moveTo(drawCrossX, drawCrossY - 15);
+    ctx.lineTo(drawCrossX, drawCrossY + 15);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(drawCrossX, drawCrossY, 4, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function loop() {
+    const now = performance.now() / 1000;
+    const dt = now - lastTime;
+    lastTime = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function updateCrosshairFromEvent(ev) {
+    const rect = canvas.getBoundingClientRect();
+    let clientX;
+    let clientY;
+    if (ev.touches && ev.touches.length > 0) {
+      clientX = ev.touches[0].clientX;
+      clientY = ev.touches[0].clientY;
+    } else {
+      clientX = ev.clientX;
+      clientY = ev.clientY;
+    }
+    crosshairX = clientX - rect.left;
+    crosshairY = clientY - rect.top;
+  }
+
+  canvas.addEventListener("mousemove", function(ev) {
+    updateCrosshairFromEvent(ev);
+  });
+
+  canvas.addEventListener("mousedown", function(ev) {
+    updateCrosshairFromEvent(ev);
+    const rect = canvas.getBoundingClientRect();
+    const x = ev.clientX - rect.left;
+    const y = ev.clientY - rect.top;
+    handleShot(x, y);
+  });
+
+  canvas.addEventListener("touchstart", function(ev) {
+    ev.preventDefault();
+    updateCrosshairFromEvent(ev);
+    const rect = canvas.getBoundingClientRect();
+    const touch = ev.touches[0];
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    handleShot(x, y);
+  }, { passive: false });
+
+  canvas.addEventListener("touchmove", function(ev) {
+    ev.preventDefault();
+    updateCrosshairFromEvent(ev);
+  }, { passive: false });
+
+  startBtn.addEventListener("click", function() {
+    if (!running) {
+      startGame();
+    }
+  });
+
+  stopBtn.addEventListener("click", function() {
+    stopGame();
+  });
+
+  restartBtn.addEventListener("click", function() {
+    startGame();
+  });
+
+  slowBtn.addEventListener("click", function() {
+    baseSpeed = 80;
+  });
+  normalBtn.addEventListener("click", function() {
+    baseSpeed = 120;
+  });
+  fastBtn.addEventListener("click", function() {
+    baseSpeed = 180;
+  });
+
+  bgmToggleBtn.addEventListener("click", function() {
+    toggleBgm();
+  });
+
+  bgmSelect.addEventListener("change", function() {
+    if (bgmOn && running) {
+      playBgm();
+    }
+  });
+
+  lastTime = performance.now() / 1000;
+  updateTexts();
+  loop();
+})();
+</script>
+</body>
+</html>
